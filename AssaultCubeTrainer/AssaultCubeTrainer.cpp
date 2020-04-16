@@ -6,47 +6,90 @@
 #include <vector>
 #include <Windows.h>
 #include "proc.h"
+#include "mem.h"
 
 int main()
 {
-    //Get ProcId of the target process
+	HANDLE hProcess = 0;
+
+	uintptr_t moduleBase = 0, localPlayerPtr = 0, healthAddr = 0;
+	bool bHealth = false, bAmmo = false, bRecoil = false;
+
+	const int newValue = 1337;
+
 	DWORD procId = GetProcId(L"ac_client.exe");
 
-	//Getmodulebaseadress
-	uintptr_t moduleBase = GetModuleBaseAdress(procId, L"ac_client.exe");
+	if (procId)
+	{
+		hProcess = OpenProcess(PROCESS_ALL_ACCESS, NULL, procId);
 
-	//Get Handle to Process
-	HANDLE hProcess = 0;
-	hProcess = OpenProcess(PROCESS_ALL_ACCESS, NULL, procId);
+		moduleBase = GetModuleBaseAdress(procId, L"ac_client.exe");
 
-	//Resolve base adress of the pointer chain
-	uintptr_t dynamicPtrBaseAddr = moduleBase + 0x10f4f4;
+		localPlayerPtr = moduleBase + 0x10f4f4;
 
-	std::cout << "Dynamic Pointer Base Adress = " << "0x" << std::hex << dynamicPtrBaseAddr << std::endl;
+		healthAddr = FindDMAAddy(hProcess, localPlayerPtr, { 0xf8 });
+	}
+	else {
+		std::cout << "Process not found, press enter to exit...\n";
+		getchar();
+		return 0;
+	}
 
-	//Resolve our ammo pointer chain
-	std::vector<unsigned int> ammoOffsets = { 0x374, 0x14, 0x0 };
-	uintptr_t ammoAddr = FindDMAAddy(hProcess, dynamicPtrBaseAddr, ammoOffsets);
+	DWORD dwExit = 0;
 
-	std::cout << "Ammo Adress = " << "0x" << std::hex << ammoAddr << std::endl;
+	std::cout << "Trainer started !\n";
+	std::cout << "Help :\nF1 : Infinite Health (on/off)\nF2 : Infinite Ammo (on/off)\nF3 : No Recoil (on/off)\nINSERT : Exit Trainer\n";
 
-	//Read Ammo value
-	int ammoValue = 0;
+	while (GetExitCodeProcess(hProcess, &dwExit) && dwExit == STILL_ACTIVE)
+	{
+		if (GetAsyncKeyState(VK_F1) & 1)
+		{
+			bHealth = !bHealth;
+		}
 
-	ReadProcessMemory(hProcess, (BYTE*)ammoAddr, &ammoValue, sizeof(ammoValue), nullptr);
+		if (GetAsyncKeyState(VK_F2) & 1)
+		{
+			bAmmo = !bAmmo;
 
-	std::cout << "Current ammo = " << std::dec << ammoValue << std::endl;
+			if (bAmmo)
+			{
+				//ff 06 = inc [esi];
+				mem::PatchEx((BYTE*)(moduleBase + 0x637e9), (BYTE*)"\xFF\x06", 2, hProcess);
+			}
+			else
+			{
+				//ff 0e = dec [esi];
+				mem::PatchEx((BYTE*)(moduleBase + 0x637e9), (BYTE*)"\xFF\x0E", 2, hProcess);
+			}
+		}
 
-	//Write to it
-	int newAmmo = 1337;
-	WriteProcessMemory(hProcess, (BYTE*)ammoAddr, &newAmmo, sizeof(newAmmo), nullptr);
+		if (GetAsyncKeyState(VK_F3) & 1)
+		{
+			bRecoil = !bRecoil;
 
-	//Read out again
-	ReadProcessMemory(hProcess, (BYTE*)ammoAddr, &ammoValue, sizeof(ammoValue), nullptr);
+			if (bRecoil)
+			{
+				mem::NopEx((BYTE*)(moduleBase + 0x63786), 10, hProcess);
+			}
+			else {
+				mem::PatchEx((BYTE*)(moduleBase + 0x63786), (BYTE*)"\x50\x8d\x4c\x24\x1c\x51\x8b\xce\xff\xd2", 10, hProcess);
+			}
+		}
 
-	std::cout << "New ammo = " << std::dec << ammoValue << std::endl;
+		if (GetAsyncKeyState(VK_INSERT) & 1)
+		{
+			return 0;
+		}
 
+		//permanent write or freeze
+		if (bHealth)
+		{
+			mem::PatchEx((BYTE*)healthAddr, (BYTE*)&newValue, sizeof(newValue), hProcess);
+		}
+		Sleep(10);
+	}
+
+	std::cout << "Process not found, press enter to exit...\n";
 	getchar();
-
 	return 0;
 }

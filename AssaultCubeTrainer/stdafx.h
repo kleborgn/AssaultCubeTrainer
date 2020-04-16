@@ -11,3 +11,7 @@
 #include <tchar.h>
 
 // TODO: reference additional headers your program requires here
+#include <iostream>
+#include <vector>
+#include <Windows.h>
+#include <TlHelp32.h>
